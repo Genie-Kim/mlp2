@@ -2,8 +2,8 @@
 2번 problem
 
 # installation
-cuda 10.1\n
-sudo update\n
-sudo apt install graphviz\n
-pip install -r requirement.txt\n
-done\n
+	cuda 10.1
+	sudo update
+	sudo apt install graphviz
+	pip install -r requirement.txt
+	done
