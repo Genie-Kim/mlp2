@@ -8,6 +8,7 @@ from keras.models import Sequential
 from keras.layers import Dense
 from keras.layers import LeakyReLU
 from matplotlib import pyplot
+import tensorflow as tf
 import math
 import numpy as np
 import datetime
@@ -15,6 +16,7 @@ from tensorboardX import SummaryWriter
 from keras.utils.vis_utils import plot_model
 import os
 from itertools import product
+from keras import optimizers
 
 
 # define the standalone discriminator model
@@ -28,7 +30,9 @@ def define_discriminator(act,num_neuron_D,n_inputs=2):
 		model.add(Dense(num_neuron_D, activation=act, kernel_initializer='he_uniform', input_dim=n_inputs))
 	model.add(Dense(1, activation='sigmoid'))
 	# compile model
-	model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+	adam = optimizers.Adam(lr=0.01, beta_1=0.9, beta_2=0.999)
+	model.compile(loss='binary_crossentropy', optimizer=adam, metrics=['accuracy'])
+	# model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 	return model
 
 # define the standalone generator model
@@ -55,7 +59,9 @@ def define_gan(generator, discriminator):
 	# add the discriminator
 	model.add(discriminator)
 	# compile model
-	model.compile(loss='binary_crossentropy', optimizer='adam')
+	adam = optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999)
+	model.compile(loss='binary_crossentropy', optimizer=adam)
+	# model.compile(loss='binary_crossentropy', optimizer='adam')
 	return model
 
 # generate n real samples with class labels
@@ -110,18 +116,19 @@ def summarize_performance(epoch, generator, discriminator, latent_dim,writer,log
 	print(epoch, ' acc_real:',acc_real, ' acc_fake:',acc_fake, ' now bestRMSE:',bestRMSE,' now RMSE:',RMSE, 'best new metric:',best_new_metric,'new_metric:',new_metric)
 	# figure title
 	title = str(epoch) + ' epoch_real(R) fake(B)_' + setting + '_RMSE:' + str(RMSE) + '_NewM:' + str(new_metric)
-	# use RMSE for evaluate generator
-	if bestRMSE > RMSE or (epoch+1) % 200==0 or best_new_metric > new_metric:  # best RMSE가 갱신되거나 특정 epoch에 도달하면 figure 저장.
-		draw_scatter(x_real,x_fake,title,log_dir)
+
 	# use new metric for evaluate generator
 	if best_new_metric > new_metric: # best new_metric이 갱신되면 저장.
 		draw_scatter(x_real, x_fake, title+' new', log_dir)
+	# use RMSE for evaluate generator
+	elif bestRMSE > RMSE or (epoch+1) % 200==0 or best_new_metric > new_metric:  # best RMSE가 갱신되거나 특정 epoch에 도달하면 figure 저장.
+		draw_scatter(x_real,x_fake,title,log_dir)
 
-	if bestRMSE > RMSE:# best RMSE가 갱신되면 figure 저장.
+
+	if bestRMSE > RMSE:# best RMSE 갱신
 		best_list[0] = RMSE
 		best_list[1] = epoch
-
-	if best_new_metric > new_metric:
+	if best_new_metric > new_metric:# best metric 갱신
 		best_list[2] = new_metric
 		best_list[3] = epoch
 
@@ -146,7 +153,7 @@ def calculate_rmse_ofsample(fake_sample):
 
 
 # train the generator and discriminator
-def train(g_model, d_model, gan_model, latent_dim,writer,log_dir,setting, n_epochs=10000, n_batch=128, n_eval=10):
+def train(g_model, d_model, gan_model, latent_dim,writer,log_dir,setting, n_epochs=10000, n_batch=256, n_eval=10):
 	# determine half the size of one batch, for updating the discriminator
 	half_batch = int(n_batch / 2)
 	best_list = [1e10,0,1e10,0] # initial [best rmse, best rmse epoch, best new metric, best new metric epoch]
@@ -195,15 +202,24 @@ if __name__ == '__main__':
 	exp_dir = "./logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 	os.makedirs(exp_dir)
 	with open(os.path.join(exp_dir,'RMSE info.txt'), "w") as f:
-		f.write('setting,best RMSE,best new metric' + '\n')
-	# default_setting = {'act':3, 'ldim' : 1, 'num_neuron_D':2, 'num_neuron_G':1}
+		f.write('setting,best RMSE,best RMSE epoch, best new metric, best new metric epoch' + '\n')
+	# default_setting = {'act':0, 'ldim' : 1, 'num_neuron_D':2, 'num_neuron_G':1}
 
 	# 두개를 교차해서 search 할때는
-	# templist = [x for x in range(5)]
-	# item = [templist,templist]
-	# for index1, index2 in list(product(*item)):
-	for index in range(5):
-		default_setting = {'act': index, 'ldim': 1, 'num_neuron_D': 2, 'num_neuron_G': 1}
+	templist = [x for x in range(5)]
+	item = [templist,templist]
+	for index1, index2 in list(product(*item)):
+		default_setting = {'act': 2, 'ldim': index1, 'num_neuron_D': 4, 'num_neuron_G': index2}
+
+	# # custom search
+	# templist = [(2,2),(4,3),(4,1),(4,2)]
+	#
+	# for index1, (index2,index3) in list(product(*[[0,1,2,3,4],templist])):
+	# 	default_setting = {'act': 2, 'ldim': 3, 'num_neuron_D': 4, 'num_neuron_G': 1}
+
+	# # 한 개의 parameter만 searching.
+	# for index in range(5):
+	# 	default_setting = {'act': 2, 'ldim': index, 'num_neuron_D': 2, 'num_neuron_G': 2}
 
 		setting = generate_filename_fromsetting(default_setting)
 		print('The Setting : ' + setting)
@@ -212,34 +228,34 @@ if __name__ == '__main__':
 		log_dir = os.path.join(exp_dir,setting)
 		os.mkdir(log_dir)
 		writer = SummaryWriter(log_dir)
+		with tf.device('/device:GPU:0'):
+			# size of the latent space
+			latent_dim = latent_dims[default_setting['ldim']]
+			# number of neuron of discriminator's hidden layer
+			num_neuron_D = num_of_neurons[default_setting['num_neuron_D']]
+			# number of neuron of generator's hidden layer
+			num_neuron_G = num_of_neurons[default_setting['num_neuron_G']]
+			# activation function of hidden layer of both generator & discriminator
+			act = activations[default_setting['act']]
+			# create the discriminator
+			discriminator = define_discriminator(act,num_neuron_D)
+			# create the generator
+			generator = define_generator(act, latent_dim,num_neuron_G)
+			# create the gan
+			gan_model = define_gan(generator, discriminator)
 
-		# size of the latent space
-		latent_dim = latent_dims[default_setting['ldim']]
-		# number of neuron of discriminator's hidden layer
-		num_neuron_D = num_of_neurons[default_setting['num_neuron_D']]
-		# number of neuron of generator's hidden layer
-		num_neuron_G = num_of_neurons[default_setting['num_neuron_G']]
-		# activation function of hidden layer of both generator & discriminator
-		act = activations[default_setting['act']]
-		# create the discriminator
-		discriminator = define_discriminator(act,num_neuron_D)
-		# create the generator
-		generator = define_generator(act, latent_dim,num_neuron_G)
-		# create the gan
-		gan_model = define_gan(generator, discriminator)
+			# summarize the model
+			discriminator.summary()
+			generator.summary()
+			gan_model.summary()
 
-		# summarize the model
-		discriminator.summary()
-		generator.summary()
-		gan_model.summary()
+			# plot the model
+			plot_model(generator, to_file=os.path.join(log_dir,setting + ' generator_plot.png'), show_shapes=True, show_layer_names=True)
+			plot_model(discriminator, to_file=os.path.join(log_dir,setting + ' discriminator_plot.png'), show_shapes=True, show_layer_names=True)
+			plot_model(gan_model, to_file=os.path.join(log_dir,setting + ' GAN_plot.png'), show_shapes=True, show_layer_names=True)
+			# train model
+			best_list = train(generator, discriminator, gan_model, latent_dim, writer,log_dir,setting,n_batch=256,n_epochs=7000)
 
-		# plot the model
-		plot_model(generator, to_file=os.path.join(log_dir,setting + ' generator_plot.png'), show_shapes=True, show_layer_names=True)
-		plot_model(discriminator, to_file=os.path.join(log_dir,setting + ' discriminator_plot.png'), show_shapes=True, show_layer_names=True)
-		plot_model(gan_model, to_file=os.path.join(log_dir,setting + ' GAN_plot.png'), show_shapes=True, show_layer_names=True)
-		# train model
-		best_list = train(generator, discriminator, gan_model, latent_dim, writer,log_dir,setting)
-
-		with open(os.path.join(exp_dir,'RMSE info.txt'), "a") as f:
-			f.write(setting + ',' + ','.join(best_list) + ','+ '\n') # write bestRMSE per setting, csv format.
+			with open(os.path.join(exp_dir,'RMSE info.txt'), "a") as f:
+				f.write(setting + ',' + ','.join([str(x) for x in best_list]) + '\n') # write bestRMSE per setting, csv format.
 
